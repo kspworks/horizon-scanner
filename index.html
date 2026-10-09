@@ -1,0 +1,565 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Horizon Scanner</title>
+<meta name="theme-color" content="#0f1412">
+<style>
+:root{
+  --bg:#f6f5f1; --surface:#ffffff; --text:#1d2420; --muted:#5f6b64; --line:#d9ddd6;
+  --accent:#d9480f; --accent-ink:#ffffff; --ok:#2b8a3e; --warn:#c77700; --bad:#c92a2a;
+  --terrain:#6b8f71; --sun1:#e8590c; --sun2:#f59f00; --sun3:#4c6ef5; --pt:#1d2420;
+  --radius:12px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1412; --surface:#18201c; --text:#e8ece9; --muted:#9aa69f; --line:#2c3631;
+    --accent:#ff6b2c; --accent-ink:#111; --terrain:#5f8a66; --pt:#e8ece9; --sun3:#748ffc;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1412; --surface:#18201c; --text:#e8ece9; --muted:#9aa69f; --line:#2c3631;
+  --accent:#ff6b2c; --accent-ink:#111; --terrain:#5f8a66; --pt:#e8ece9; --sun3:#748ffc;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;border:0;border-radius:var(--radius);padding:.7em 1em;cursor:pointer;
+  background:var(--surface);color:var(--text);border:1px solid var(--line)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+button:disabled{opacity:.45}
+input,select{font:inherit;padding:.5em .6em;border-radius:8px;border:1px solid var(--line);
+  background:var(--surface);color:var(--text);width:100%}
+label{display:block;font-size:.85rem;color:var(--muted)}
+.screen{display:none;min-height:100%}
+.screen.on{display:block}
+.wrap{max-width:760px;margin:0 auto;padding:20px 16px 40px}
+h1{font-size:1.5rem;margin:.2em 0 .4em}
+h2{font-size:1.1rem;margin:1.4em 0 .5em}
+p{margin:.5em 0}
+.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:12px 0}
+.note{padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:.92rem}
+.note.bad{border-color:var(--bad)}
+ol{padding-left:1.2em}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+code{font-size:.9em}
+
+/* scan screen */
+#scan{position:fixed;inset:0;background:#000;color:#fff;overflow:hidden;
+  -webkit-user-select:none;user-select:none;touch-action:none}
+#scan.on{display:block}
+#video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#cross{position:absolute;left:50%;top:50%;width:0;height:0;pointer-events:none}
+#cross::before,#cross::after{content:"";position:absolute;background:#ff3b30;box-shadow:0 0 0 1px rgba(0,0,0,.6)}
+#cross::before{left:-40px;top:-1px;width:80px;height:2px}
+#cross::after{left:-1px;top:-40px;width:2px;height:80px}
+#ring{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;
+  border:2px solid #ff3b30;border-radius:50%;pointer-events:none;box-shadow:0 0 0 1px rgba(0,0,0,.6)}
+#ring.tracing{border-color:#30d158;width:34px;height:34px;margin:-17px 0 0 -17px}
+.hud{position:absolute;left:0;right:0;padding:10px 12px;display:flex;gap:8px;align-items:flex-start;
+  justify-content:space-between;background:linear-gradient(rgba(0,0,0,.65),rgba(0,0,0,0))}
+#hudTop{top:0;padding-top:max(10px,env(safe-area-inset-top))}
+.read{font-variant-numeric:tabular-nums;font-size:1.6rem;font-weight:700;line-height:1.1;text-shadow:0 1px 2px #000}
+.read small{font-size:.75rem;font-weight:500;opacity:.8;display:block}
+#status{font-size:.8rem;opacity:.9;text-shadow:0 1px 2px #000}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+#hudBottom{position:absolute;left:0;right:0;bottom:0;padding:14px 12px max(16px,env(safe-area-inset-bottom));
+  display:grid;grid-template-columns:1fr 1.6fr 1fr;gap:10px;align-items:end;
+  background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.7))}
+#scan button{background:rgba(30,30,30,.75);color:#fff;border:1px solid rgba(255,255,255,.25);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+#btnTrace{height:84px;font-size:1.05rem;font-weight:700;background:rgba(217,72,15,.9)!important;border-color:transparent!important}
+#btnTrace.active{background:rgba(48,209,88,.95)!important;color:#000!important}
+#btnPoint,#btnUndo{height:64px}
+.topbtns{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+.topbtns button{padding:.45em .8em;font-size:.9rem}
+#toast{position:absolute;left:50%;top:58%;transform:translateX(-50%);background:rgba(0,0,0,.75);
+  padding:6px 12px;border-radius:20px;font-size:.9rem;opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+#sunPanel{position:absolute;left:12px;right:12px;top:40%;background:rgba(20,20,20,.88);border-radius:14px;
+  padding:14px;display:none;font-size:.95rem}
+#sunPanel.on{display:block}
+
+/* results */
+#chartBox{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:8px;margin-top:8px}
+#chart{width:100%;height:auto;display:block;touch-action:manipulation}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:.8rem;color:var(--muted);padding:6px 4px 2px}
+.legend i{display:inline-block;width:14px;height:3px;vertical-align:middle;margin-right:5px;border-radius:2px}
+#out{width:100%;height:160px;font:13px/1.35 ui-monospace,Menlo,Consolas,monospace;padding:8px;border-radius:10px;
+  border:1px solid var(--line);background:var(--surface);color:var(--text);white-space:pre}
+</style>
+</head>
+<body>
+
+<!-- ============ INTRO ============ -->
+<section id="intro" class="screen on">
+  <div class="wrap">
+    <h1>Horizon Scanner</h1>
+    <p class="muted">Measure your skyline (trees, buildings and ridges) with the phone camera and orientation sensors, then export a <code>horizon.txt</code> file for the Open-Meteo Solar Forecast integration.</p>
+
+    <div id="secureWarn" class="note bad" hidden>
+      <b>This page isn't running in a secure context.</b> Browsers only allow camera and compass access over HTTPS (or on localhost).
+      Open it from an HTTPS address, for example your Home Assistant under <code>https://…/local/horizon-scanner.html</code>, or GitHub Pages.
+      Another option: in Chrome on Android, open <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> and add this page's <code>http://</code> origin.
+    </div>
+
+    <h2>How to measure</h2>
+    <ol>
+      <li>Stand at the middle of your panel array, at panel height if you can.</li>
+      <li>Keep away from metal (panel frames, railings, a car) because it throws off the compass. Wave the phone in a figure-8 once to calibrate it.</li>
+      <li>Put the red crosshair on the skyline, then <b>hold “Trace”</b> and slowly sweep along the tops of trees, roofs and ridges. Tap <b>“+ Point”</b> for single spots such as a chimney tip.</li>
+      <li>Cover at least east → south → west, which is everywhere the sun goes. To be thorough, sweep north-east → north-west.</li>
+      <li>Use <b>Align to sun</b> on a sunny day for the most accurate compass. It removes magnetic declination and nearby interference in one step.</li>
+      <li>Open <b>Results</b>, check the chart against the sun paths, tap any bad points to delete them, then download the file.</li>
+    </ol>
+
+    <h2>Settings</h2>
+    <div class="grid">
+      <div><label for="decl">Magnetic declination (° east, + / −)</label><input id="decl" type="number" step="0.1" value="0"></div>
+      <div><label for="lat">Latitude</label><input id="lat" type="number" step="0.0001" placeholder="auto from GPS"></div>
+      <div><label for="lng">Longitude</label><input id="lng" type="number" step="0.0001" placeholder="auto from GPS"></div>
+    </div>
+    <p class="muted" style="font-size:.85rem">Declination is about +6° in western Ukraine. Check the NOAA magnetic field calculator for your exact spot. You can skip it if you use “Align to sun”. Location is used only on this phone, for the sun position and the sun-path chart.</p>
+
+    <div class="row" style="margin-top:16px">
+      <button class="primary" id="btnStart">Start scanning</button>
+      <button id="btnToResults0">Results (<span class="nPts">0</span> points)</button>
+    </div>
+    <p id="startErr" class="note bad" hidden></p>
+  </div>
+</section>
+
+<!-- ============ SCAN ============ -->
+<section id="scan" class="screen">
+  <video id="video" playsinline muted autoplay></video>
+  <div id="cross"></div><div id="ring"></div>
+  <div class="hud" id="hudTop">
+    <div>
+      <div class="read"><span id="rAz">—</span>°<small>azimuth <span id="rDir"></span></small></div>
+    </div>
+    <div>
+      <div class="read"><span id="rEl">—</span>°<small>elevation</small></div>
+    </div>
+    <div class="topbtns">
+      <button id="btnResults">Results · <span class="nPts">0</span></button>
+      <button id="btnSun">Align to sun</button>
+      <div id="status"></div>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <div id="sunPanel">
+    <p style="margin-top:0"><b>Align to sun</b></p>
+    <p>Put the sun in the center of the crosshair. Look at the screen, never at the sun itself. Hold steady, then tap <b>Sun centered</b>.</p>
+    <p id="sunInfo" class="muted" style="color:#bbb"></p>
+    <div class="row">
+      <button id="btnSunOk" style="background:#d9480f!important">Sun centered</button>
+      <button id="btnSunReset">Use declination</button>
+      <button id="btnSunCancel">Close</button>
+    </div>
+  </div>
+  <div id="hudBottom">
+    <button id="btnUndo">Undo</button>
+    <button id="btnTrace">Hold to trace</button>
+    <button id="btnPoint">+ Point</button>
+  </div>
+</section>
+
+<!-- ============ RESULTS ============ -->
+<section id="results" class="screen">
+  <div class="wrap">
+    <div class="row" style="justify-content:space-between">
+      <h1 style="margin:0">Results</h1>
+      <button id="btnBack">← Back to scanning</button>
+    </div>
+    <p class="muted" id="sumLine"></p>
+
+    <div id="chartBox">
+      <svg id="chart" viewBox="0 0 760 420" role="img" aria-label="Horizon profile chart"></svg>
+      <div class="legend">
+        <span><i style="background:var(--terrain)"></i>horizon (export)</span>
+        <span><i style="background:var(--pt);height:6px;width:6px;border-radius:50%"></i>measured points (tap to delete)</span>
+        <span><i style="background:var(--sun1)"></i>sun 21 Jun</span>
+        <span><i style="background:var(--sun2)"></i>equinox</span>
+        <span><i style="background:var(--sun3)"></i>21 Dec</span>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div><label for="res">Azimuth step</label>
+        <select id="res"><option value="1">1°</option><option value="2" selected>2°</option><option value="5">5°</option></select></div>
+      <div><label for="merge">Points within one step</label>
+        <select id="merge"><option value="max">Highest (conservative)</option><option value="median">Median (less noise)</option></select></div>
+      <div><label for="decl2">Declination (° east)</label><input id="decl2" type="number" step="0.1"></div>
+      <div><label for="lat2">Latitude (for sun paths)</label><input id="lat2" type="number" step="0.0001"></div>
+    </div>
+    <p class="muted" id="corrLine" style="font-size:.88rem"></p>
+
+    <h2>horizon.txt</h2>
+    <textarea id="out" readonly></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="btnDownload">Download horizon.txt</button>
+      <button id="btnCopy">Copy</button>
+      <button id="btnClear">Clear all points</button>
+    </div>
+    <p class="muted" style="font-size:.88rem;margin-top:14px">Copy the file to your Home Assistant config folder, for example <code>/config/horizon.txt</code>. Then go to the integration's <b>Configure</b> → array page → tick <b>Use horizon file</b> and set the path. Directions you didn't measure are interpolated in a straight line between their measured neighbours.</p>
+  </div>
+</section>
+
+<script>
+(() => {
+'use strict';
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const RAD = Math.PI / 180, DEG = 180 / Math.PI;
+const KEY = 'horizon-scanner-v1';
+
+/* ---------------- state ---------------- */
+const state = { points: [], decl: 0, sunOffset: null, lat: null, lng: null, res: 2, merge: 'max' };
+// each point: {m: raw sensor azimuth (deg, before correction), e: elevation (deg)}
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s && Array.isArray(s.points)) Object.assign(state, s); } catch (_) {}
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {} }
+load();
+
+const norm360 = a => ((a % 360) + 360) % 360;
+const norm180 = a => { a = norm360(a); return a > 180 ? a - 360 : a; };
+const correction = () => state.sunOffset != null ? state.sunOffset : (+state.decl || 0);
+const DIRS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const dirName = az => DIRS[Math.round(norm360(az) / 22.5) % 16];
+
+/* ---------------- screens ---------------- */
+function show(id) {
+  $$('.screen').forEach(s => s.classList.toggle('on', s.id === id));
+  if (id === 'results') renderResults();
+  if (id === 'intro') syncInputs();
+}
+function updateCounts() { $$('.nPts').forEach(e => e.textContent = state.points.length); }
+function syncInputs() {
+  $('#decl').value = state.decl; $('#decl2').value = state.decl;
+  if (state.lat != null) { $('#lat').value = state.lat; $('#lat2').value = state.lat; }
+  if (state.lng != null) $('#lng').value = state.lng;
+  $('#res').value = String(state.res); $('#merge').value = state.merge;
+  updateCounts();
+}
+syncInputs();
+if (!window.isSecureContext) $('#secureWarn').hidden = false;
+
+$('#decl').addEventListener('input', e => { state.decl = parseFloat(e.target.value) || 0; save(); });
+$('#lat').addEventListener('input', e => { const v = parseFloat(e.target.value); state.lat = isFinite(v) ? v : null; save(); });
+$('#lng').addEventListener('input', e => { const v = parseFloat(e.target.value); state.lng = isFinite(v) ? v : null; save(); });
+$('#decl2').addEventListener('input', e => { state.decl = parseFloat(e.target.value) || 0; save(); renderResults(); });
+$('#lat2').addEventListener('input', e => { const v = parseFloat(e.target.value); state.lat = isFinite(v) ? v : null; save(); renderResults(); });
+$('#res').addEventListener('change', e => { state.res = +e.target.value; save(); renderResults(); });
+$('#merge').addEventListener('change', e => { state.merge = e.target.value; save(); renderResults(); });
+
+/* ---------------- orientation → pointing vector ---------------- */
+// W3C DeviceOrientation: R = Rz(alpha)·Rx(beta)·Ry(gamma), earth frame x=East y=North z=Up.
+// Rear camera looks along device −Z, so the view direction is −(3rd column of R).
+function viewVector(alpha, beta, gamma) {
+  const a = alpha * RAD, b = beta * RAD, g = gamma * RAD;
+  const ca = Math.cos(a), sa = Math.sin(a), cb = Math.cos(b), sb = Math.sin(b), cg = Math.cos(g), sg = Math.sin(g);
+  return [-(ca * sg + sa * sb * cg), ca * sb * cg - sa * sg, -cb * cg];
+}
+function vecToAngles(v) {
+  const n = Math.hypot(v[0], v[1], v[2]) || 1;
+  const e = v[0] / n, nn = v[1] / n, u = v[2] / n;
+  return { az: norm360(Math.atan2(e, nn) * DEG), el: Math.asin(Math.max(-1, Math.min(1, u))) * DEG };
+}
+let smooth = null, absolute = null, lastEvt = 0;
+const buf = []; // recent raw vectors for averaging / steadiness
+function onOrientation(ev) {
+  let { alpha, beta, gamma } = ev;
+  if (alpha == null || beta == null || gamma == null) return;
+  let abs = ev.absolute === true || ev.type === 'deviceorientationabsolute';
+  if (typeof ev.webkitCompassHeading === 'number' && ev.webkitCompassHeading >= 0) { // iOS
+    alpha = norm360(360 - ev.webkitCompassHeading); abs = true;
+  }
+  absolute = abs;
+  const v = viewVector(alpha, beta, gamma);
+  const k = 0.18;
+  smooth = smooth ? smooth.map((x, i) => x + (v[i] - x) * k) : v.slice();
+  const t = performance.now(); lastEvt = t;
+  buf.push({ t, v }); while (buf.length && t - buf[0].t > 600) buf.shift();
+}
+function averaged() {
+  if (!buf.length) return null;
+  const s = [0, 0, 0]; buf.forEach(b => { s[0] += b.v[0]; s[1] += b.v[1]; s[2] += b.v[2]; });
+  const mean = vecToAngles(s);
+  let spread = 0;
+  const mn = Math.hypot(...s);
+  buf.forEach(b => { const d = (b.v[0]*s[0] + b.v[1]*s[1] + b.v[2]*s[2]) / mn / (Math.hypot(...b.v) || 1);
+    spread = Math.max(spread, Math.acos(Math.max(-1, Math.min(1, d))) * DEG); });
+  return { ...mean, spread };
+}
+
+/* ---------------- start ---------------- */
+let stream = null, wakeLock = null, listening = false;
+async function start() {
+  $('#startErr').hidden = true;
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') throw new Error('Motion sensor permission was denied.');
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+      throw new Error('Camera API unavailable. The page must be opened over HTTPS.');
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    const vid = $('#video'); vid.srcObject = stream; await vid.play().catch(() => {});
+  } catch (err) {
+    $('#startErr').textContent = 'Could not start: ' + (err && err.message ? err.message : err);
+    $('#startErr').hidden = false; return;
+  }
+  if (!listening) {
+    if ('ondeviceorientationabsolute' in window) window.addEventListener('deviceorientationabsolute', onOrientation);
+    else window.addEventListener('deviceorientation', onOrientation);
+    listening = true;
+  }
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+  if (navigator.geolocation && (state.lat == null || state.lng == null)) {
+    navigator.geolocation.getCurrentPosition(p => {
+      state.lat = +p.coords.latitude.toFixed(4); state.lng = +p.coords.longitude.toFixed(4); save(); syncInputs();
+    }, () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 600000 });
+  }
+  show('scan'); requestAnimationFrame(loop);
+}
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && wakeLock !== null && $('#scan').classList.contains('on')) {
+    try { wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+  }
+});
+$('#btnStart').addEventListener('click', start);
+
+/* ---------------- HUD loop ---------------- */
+function loop() {
+  if (!$('#scan').classList.contains('on')) return;
+  const st = $('#status');
+  if (smooth) {
+    const a = vecToAngles(smooth);
+    const az = norm360(a.az + correction());
+    $('#rAz').textContent = az.toFixed(1);
+    $('#rEl').textContent = a.el.toFixed(1);
+    $('#rDir').textContent = dirName(az);
+    const avg = averaged();
+    const steady = avg && avg.spread < 0.6;
+    const stale = performance.now() - lastEvt > 1000;
+    st.innerHTML =
+      `<span class="dot" style="background:${stale ? '#ff453a' : steady ? '#30d158' : '#ffd60a'}"></span>${stale ? 'no sensor data' : steady ? 'steady' : 'moving'}<br>` +
+      (state.sunOffset != null ? 'sun-aligned' : absolute ? 'compass + ' + (+state.decl).toFixed(1) + '°' : '<span style="color:#ffd60a">relative compass: align to sun</span>');
+  } else {
+    st.innerHTML = '<span class="dot" style="background:#ff453a"></span>waiting for sensors…';
+  }
+  requestAnimationFrame(loop);
+}
+let toastT = 0;
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.opacity = 1; clearTimeout(toastT); toastT = setTimeout(() => t.style.opacity = 0, 1200); }
+
+/* ---------------- recording ---------------- */
+function addPoint(src) {
+  if (!src) return false;
+  const a = src.az != null ? src : vecToAngles(src);
+  state.points.push({ m: +a.az.toFixed(2), e: +a.el.toFixed(2) });
+  return true;
+}
+$('#btnPoint').addEventListener('click', () => {
+  const avg = averaged();
+  if (!avg) { toast('No sensor data yet'); return; }
+  addPoint(avg); save(); updateCounts();
+  if (navigator.vibrate) navigator.vibrate(25);
+  toast(`Point ${state.points.length}: ${norm360(avg.az + correction()).toFixed(1)}° / ${avg.el.toFixed(1)}°`);
+});
+let traceTimer = 0, traceStartLen = 0;
+const traceBtn = $('#btnTrace');
+function traceStart(e) {
+  e.preventDefault(); if (traceTimer) return;
+  if (!smooth) { toast('No sensor data yet'); return; }
+  traceStartLen = state.points.length;
+  traceBtn.classList.add('active'); traceBtn.textContent = 'Tracing…'; $('#ring').classList.add('tracing');
+  if (navigator.vibrate) navigator.vibrate(15);
+  traceTimer = setInterval(() => { addPoint(smooth); updateCounts(); }, 100);
+}
+function traceEnd() {
+  if (!traceTimer) return;
+  clearInterval(traceTimer); traceTimer = 0;
+  traceBtn.classList.remove('active'); traceBtn.textContent = 'Hold to trace'; $('#ring').classList.remove('tracing');
+  save(); updateCounts();
+  toast(`+${state.points.length - traceStartLen} points`);
+  if (state.points.length > traceStartLen) undoStack.push(state.points.length - traceStartLen);
+}
+const undoStack = [];
+traceBtn.addEventListener('pointerdown', traceStart);
+['pointerup', 'pointercancel', 'pointerleave'].forEach(t => traceBtn.addEventListener(t, traceEnd));
+$('#scan').addEventListener('contextmenu', e => e.preventDefault());
+$('#btnPoint').addEventListener('click', () => undoStack.push(1));
+$('#btnUndo').addEventListener('click', () => {
+  const n = undoStack.pop() || 1;
+  state.points.splice(Math.max(0, state.points.length - n), n);
+  save(); updateCounts(); toast(state.points.length ? `Removed ${n} · ${state.points.length} left` : 'No points');
+});
+$('#btnResults').addEventListener('click', () => show('results'));
+$('#btnToResults0').addEventListener('click', () => show('results'));
+$('#btnBack').addEventListener('click', () => { if (stream) { show('scan'); requestAnimationFrame(loop); } else show('intro'); });
+
+/* ---------------- sun position (SunCalc formulas) ---------------- */
+function sunPosition(date, lat, lng) {
+  const dayMs = 864e5, J1970 = 2440588, J2000 = 2451545, e = RAD * 23.4397;
+  const d = date.valueOf() / dayMs - 0.5 + J1970 - J2000;
+  const M = RAD * (357.5291 + 0.98560028 * d);
+  const C = RAD * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+  const L = M + C + RAD * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const ra = Math.atan2(Math.sin(L) * Math.cos(e), Math.cos(L));
+  const lw = RAD * -lng, phi = RAD * lat;
+  const H = RAD * (280.16 + 360.9856235 * d) - lw - ra;
+  const az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi));
+  const alt = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H));
+  return { az: norm360(az * DEG + 180), el: alt * DEG };
+}
+function sunPathForDeclination(lat, decDeg) {
+  const phi = lat * RAD, dec = decDeg * RAD, pts = [];
+  for (let h = -180; h <= 180; h += 1) {
+    const H = h * RAD;
+    const alt = Math.asin(Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H)) * DEG;
+    const az = norm360(Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(phi) - Math.tan(dec) * Math.cos(phi)) * DEG + 180);
+    pts.push({ az, el: alt, h });
+  }
+  return pts;
+}
+
+/* ---------------- align to sun ---------------- */
+function sunInfoText() {
+  if (state.lat == null || state.lng == null) return 'Location unknown. Allow location access, or enter latitude/longitude on the start screen.';
+  const s = sunPosition(new Date(), state.lat, state.lng);
+  if (s.el < 1) return `The sun is below the horizon right now (${s.el.toFixed(1)}°).`;
+  return `Sun now: azimuth ${s.az.toFixed(1)}°, elevation ${s.el.toFixed(1)}°.` +
+    (state.sunOffset != null ? ` Current offset ${state.sunOffset.toFixed(1)}°.` : '');
+}
+$('#btnSun').addEventListener('click', () => { $('#sunInfo').textContent = sunInfoText(); $('#sunPanel').classList.add('on'); });
+$('#btnSunCancel').addEventListener('click', () => $('#sunPanel').classList.remove('on'));
+$('#btnSunReset').addEventListener('click', () => { state.sunOffset = null; save(); $('#sunPanel').classList.remove('on'); toast('Using compass + declination'); });
+$('#btnSunOk').addEventListener('click', () => {
+  if (state.lat == null || state.lng == null) { $('#sunInfo').textContent = sunInfoText(); return; }
+  const avg = averaged();
+  if (!avg) { $('#sunInfo').textContent = 'No sensor data yet.'; return; }
+  const s = sunPosition(new Date(), state.lat, state.lng);
+  if (s.el < 1) { $('#sunInfo').textContent = sunInfoText(); return; }
+  if (avg.spread > 1.5) { $('#sunInfo').textContent = 'Phone is moving. Hold it steady and tap again.'; return; }
+  state.sunOffset = +norm180(s.az - avg.az).toFixed(2); save();
+  const dEl = avg.el - s.el;
+  $('#sunPanel').classList.remove('on');
+  toast(`Aligned: offset ${state.sunOffset.toFixed(1)}°, elevation error ${dEl >= 0 ? '+' : ''}${dEl.toFixed(1)}°`);
+});
+
+/* ---------------- profile building ---------------- */
+function corrected() { const c = correction(); return state.points.map(p => ({ az: norm360(p.m + c), el: Math.max(0, Math.min(90, p.e)) })); }
+function buildProfile() {
+  const res = state.res, nb = Math.round(360 / res), bins = new Map();
+  for (const p of corrected()) {
+    const b = Math.floor(p.az / res) % nb;
+    if (!bins.has(b)) bins.set(b, []);
+    bins.get(b).push(p.el);
+  }
+  if (!bins.size) return null;
+  const pick = arr => {
+    if (state.merge === 'median') { const s = arr.slice().sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+    return Math.max(...arr);
+  };
+  const rows = [...bins.entries()].sort((a, b) => a[0] - b[0]).map(([b, arr]) => [b * res + res / 2, pick(arr)]);
+  let e0;
+  if (rows.length === 1) e0 = rows[0][1];
+  else {
+    const [azL, elL] = rows[rows.length - 1], [azF, elF] = rows[0];
+    e0 = elL + (elF - elL) * (360 - azL) / (azF + 360 - azL);
+  }
+  return [[0, e0], ...rows, [360, e0]];
+}
+function profileText(prof) { return prof.map(([a, e]) => a.toFixed(1) + '\t' + e.toFixed(1)).join('\n') + '\n'; }
+
+/* ---------------- chart ---------------- */
+const W = 760, H = 420, PL = 46, PR = 10, PT = 12, PB = 40;
+function renderResults() {
+  syncInputs();
+  const svg = $('#chart'), prof = buildProfile(), pts = corrected();
+  const sunMax = state.lat != null ? 90 - Math.abs(state.lat - 23.44) + 4 : 0;
+  const maxEl = Math.max(40, sunMax, ...pts.map(p => p.el + 5));
+  const yMax = Math.ceil(Math.min(90, maxEl) / 10) * 10;
+  const x = az => PL + az / 360 * (W - PL - PR);
+  const y = el => PT + (1 - el / yMax) * (H - PT - PB);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  let s = '';
+  // grid
+  for (let a = 0; a <= 360; a += 45) {
+    s += `<line x1="${x(a)}" y1="${PT}" x2="${x(a)}" y2="${H - PB}" stroke="${css('--line')}" stroke-width="1"/>`;
+    s += `<text x="${Math.min(W - PR - 14, Math.max(PL + 10, x(a)))}" y="${H - 12}" font-size="19" text-anchor="middle" fill="${css('--muted')}">${['N','NE','E','SE','S','SW','W','NW','N'][a / 45]}</text>`;
+  }
+  for (let e = 0; e <= yMax; e += 10) {
+    s += `<line x1="${PL}" y1="${y(e)}" x2="${W - PR}" y2="${y(e)}" stroke="${css('--line')}" stroke-width="1"/>`;
+    s += `<text x="${PL - 5}" y="${y(e) + 4}" font-size="18" text-anchor="end" fill="${css('--muted')}">${e}°</text>`;
+  }
+  // profile fill
+  if (prof) {
+    const line = prof.map(([a, e]) => `${x(a).toFixed(1)},${y(e).toFixed(1)}`).join(' ');
+    s += `<polygon points="${x(0)},${y(0)} ${line} ${x(360)},${y(0)}" fill="${css('--terrain')}" fill-opacity=".35"/>`;
+    s += `<polyline points="${line}" fill="none" stroke="${css('--terrain')}" stroke-width="3"/>`;
+  }
+  // sun paths
+  if (state.lat != null) {
+    [[23.44, '--sun1'], [0, '--sun2'], [-23.44, '--sun3']].forEach(([dec, col]) => {
+      const path = sunPathForDeclination(state.lat, dec).filter(p => p.el > -0.5);
+      if (!path.length) return;
+      let dstr = '', prev = null;
+      path.forEach(p => { const jump = prev && Math.abs(p.az - prev.az) > 180; dstr += (dstr && !jump ? 'L' : 'M') + x(p.az).toFixed(1) + ',' + y(Math.max(0, p.el)).toFixed(1); prev = p; });
+      s += `<path d="${dstr}" fill="none" stroke="${css(col)}" stroke-width="3" stroke-dasharray="${dec === 0 ? '6 4' : ''}"/>`;
+      path.filter(p => p.h % 15 === 0 && p.el > 0).forEach(p => {
+        s += `<circle cx="${x(p.az).toFixed(1)}" cy="${y(p.el).toFixed(1)}" r="3.5" fill="${css(col)}"/>`;
+      });
+    });
+  }
+  // points
+  pts.forEach((p, i) => { s += `<circle data-i="${i}" cx="${x(p.az).toFixed(1)}" cy="${y(p.el).toFixed(1)}" r="4" fill="${css('--pt')}" fill-opacity=".7"/>`; });
+  svg.innerHTML = s;
+  svg._x = x; svg._y = y;
+
+  const txt = prof ? profileText(prof) : '';
+  $('#out').value = txt || '(no points yet)';
+  $('#btnDownload').disabled = $('#btnCopy').disabled = !prof;
+  $('#sumLine').textContent = state.points.length
+    ? `${state.points.length} measured points → ${prof.length} lines. Sun-path dots mark each hour.`
+    : 'No points yet. Go back and trace the skyline.';
+  $('#corrLine').textContent = state.sunOffset != null
+    ? `Azimuth correction: ${state.sunOffset.toFixed(1)}° from sun alignment (declination field ignored).`
+    : `Azimuth correction: ${(+state.decl).toFixed(1)}° declination.` + (state.lat == null ? ' Enter a latitude to see sun paths.' : '');
+}
+$('#chart').addEventListener('click', ev => {
+  const svg = $('#chart'); if (!svg._x || !state.points.length) return;
+  const r = svg.getBoundingClientRect(), sx = W / r.width;
+  const px = (ev.clientX - r.left) * sx, py = (ev.clientY - r.top) * (H / r.height);
+  let best = -1, bd = 22 * sx;
+  corrected().forEach((p, i) => { const d = Math.hypot(svg._x(p.az) - px, svg._y(p.el) - py); if (d < bd) { bd = d; best = i; } });
+  if (best >= 0) { state.points.splice(best, 1); undoStack.length = 0; save(); renderResults(); }
+});
+$('#btnDownload').addEventListener('click', () => {
+  const prof = buildProfile(); if (!prof) return;
+  const blob = new Blob([profileText(prof)], { type: 'text/plain' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'horizon.txt';
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+});
+$('#btnCopy').addEventListener('click', async () => {
+  const t = $('#out').value;
+  try { await navigator.clipboard.writeText(t); $('#btnCopy').textContent = 'Copied'; }
+  catch (_) { $('#out').select(); document.execCommand && document.execCommand('copy'); $('#btnCopy').textContent = 'Copied'; }
+  setTimeout(() => $('#btnCopy').textContent = 'Copy', 1500);
+});
+$('#btnClear').addEventListener('click', () => {
+  if (!state.points.length || !confirm(`Delete all ${state.points.length} points?`)) return;
+  state.points = []; undoStack.length = 0; save(); renderResults();
+});
+
+// test hook
+window.__hs = { state, viewVector, vecToAngles, buildProfile, profileText, sunPosition, onOrientation };
+})();
+</script>
+</body>
+</html>
